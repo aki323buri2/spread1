@@ -3,6 +3,15 @@
 import React, { useRef, useCallback } from 'react'
 import { AutoSizer, Grid, GridCellProps, ScrollSync } from 'react-virtualized'
 import { cn } from '@/lib/utils'
+import {
+  cellStyles,
+  headerStyles,
+  cornerStyles,
+  gridStyles,
+  scrollbarStyles,
+  defaultDimensions,
+  layoutStyles
+} from '../styles/spreadsheet'
 
 import 'react-virtualized/styles.css'
 import { useSpreadsheetSelection } from '../hooks/useSpreadsheetSelection'
@@ -79,27 +88,17 @@ interface SpreadsheetStyles {
   }
 }
 
-// デフォルトのスタイル設定
-const defaultStyles: SpreadsheetStyles = {
-  cell: {
-    base: 'flex items-center px-1 cursor-pointer select-none overflow-hidden whitespace-nowrap bg-white',
-    selected: 'bg-blue-50',
-    active: 'z-[1]',
-    hover: 'hover:bg-gray-100',
-    border: 'border-r border-b border-gray-200',
-    selectedBorder: 'border-selected border-blue-400 -m-[1px] z-[1]'
-  },
-  header: {
-    base: 'flex items-center justify-center font-semibold select-none cursor-pointer bg-gray-100',
-    selected: 'bg-gray-200',
-    hover: 'hover:bg-gray-200',
-    border: 'border-r border-b border-gray-200'
-  },
-  corner: {
-    base: 'bg-gray-100 border-r border-b border-gray-200 cursor-pointer',
-    hover: 'hover:bg-gray-200'
-  }
+interface HeaderRendererProps extends GridCellProps {
+  isSelected: boolean
+  label: string
+  onMouseDown: (e: React.MouseEvent) => void
+  onResize?: (width: number) => void
 }
+
+// 列ヘッダーのデフォルトラベル (A-Z)
+const DEFAULT_COLUMN_LABELS = Array.from({ length: 26 }, (_, i) => 
+  String.fromCharCode(65 + i)
+)
 
 interface SpreadsheetProps extends 
   SelectionEvents,
@@ -145,32 +144,14 @@ interface CellRendererProps extends GridCellProps {
   onContextMenu?: (e: React.MouseEvent) => void
 }
 
-interface HeaderRendererProps extends GridCellProps {
-  isSelected: boolean
-  label: string
-  onMouseDown: (e: React.MouseEvent) => void
-  onResize?: (width: number) => void
-}
-
-const DEFAULT_COLUMN_WIDTH = 100
-const DEFAULT_ROW_HEIGHT = 24
-const DEFAULT_HEADER_HEIGHT = 24
-const DEFAULT_HEADER_WIDTH = 100
-const DEFAULT_SCROLLBAR_WIDTH = 17
-
-// 列ヘッダーのデフォルトラベル (A-Z)
-const DEFAULT_COLUMN_LABELS = Array.from({ length: 26 }, (_, i) => 
-  String.fromCharCode(65 + i)
-)
-
 export default function Spreadsheet({ 
   rowCount = 1000, 
   columnCount = 26,
-  defaultColumnWidth = DEFAULT_COLUMN_WIDTH,
-  defaultRowHeight = DEFAULT_ROW_HEIGHT,
-  headerHeight = DEFAULT_HEADER_HEIGHT,
-  headerWidth = DEFAULT_HEADER_WIDTH,
-  scrollbarWidth = DEFAULT_SCROLLBAR_WIDTH,
+  defaultColumnWidth = defaultDimensions.columnWidth,
+  defaultRowHeight = defaultDimensions.rowHeight,
+  headerHeight = defaultDimensions.headerHeight,
+  headerWidth = defaultDimensions.headerWidth,
+  scrollbarWidth = scrollbarStyles.width,
   className,
   cellClassName,
   headerClassName,
@@ -215,15 +196,15 @@ export default function Spreadsheet({
   // スタイルの結合
   const mergedStyles = {
     cell: {
-      ...defaultStyles.cell,
+      ...cellStyles,
       ...styles.cell
     },
     header: {
-      ...defaultStyles.header,
+      ...headerStyles,
       ...styles.header
     },
     corner: {
-      ...defaultStyles.corner,
+      ...cornerStyles,
       ...styles.corner
     }
   }
@@ -241,63 +222,65 @@ export default function Spreadsheet({
       columnIndex === selectionRange.start.col
 
     // 選択範囲の境界を計算
-    const isRangeBorder = isSelected && isRangeSelection && selectionRange && (() => {
+    const getBorderClasses = () => {
+      if (!isSelected || !selectionRange) return ''
+
       const minRow = Math.min(selectionRange.start.row, selectionRange.end.row)
       const maxRow = Math.max(selectionRange.start.row, selectionRange.end.row)
       const minCol = Math.min(selectionRange.start.col, selectionRange.end.col)
       const maxCol = Math.max(selectionRange.start.col, selectionRange.end.col)
 
-      return {
-        isTopBorder: rowIndex === minRow,
-        isBottomBorder: rowIndex === maxRow,
-        isLeftBorder: columnIndex === minCol,
-        isRightBorder: columnIndex === maxCol,
-      }
-    })()
+      const isTopBorder = rowIndex === minRow
+      const isBottomBorder = rowIndex === maxRow
+      const isLeftBorder = columnIndex === minCol
+      const isRightBorder = columnIndex === maxCol
 
-    // スタイルの計算
-    const cellStyle = {
-      ...style,
+      return cn({
+        'border-t-2 border-blue-400': isTopBorder,
+        'border-b-2 border-blue-400': isBottomBorder,
+        'border-l-2 border-blue-400': isLeftBorder,
+        'border-r-2 border-blue-400': isRightBorder
+      })
     }
 
-    if (isRangeBorder) {
-      const borderStyle = '2px solid #60a5fa'
-      if (isRangeBorder.isTopBorder) cellStyle.borderTop = borderStyle
-      if (isRangeBorder.isBottomBorder) cellStyle.borderBottom = borderStyle
-      if (isRangeBorder.isLeftBorder) cellStyle.borderLeft = borderStyle
-      if (isRangeBorder.isRightBorder) cellStyle.borderRight = borderStyle
-    }
-
-    // アクティブセルまたは選択開始セルの場合
-    if ((!isRangeSelection && isActiveCell) || (isRangeSelection && isStartCell)) {
-      cellStyle.borderTop = '2px solid #60a5fa'
-      cellStyle.borderBottom = '2px solid #60a5fa'
-      cellStyle.borderLeft = '2px solid #60a5fa'
-      cellStyle.borderRight = '2px solid #60a5fa'
-      cellStyle.margin = '-1px'
-    }
+    const cellContent = data?.[rowIndex]?.[columnIndex]?.value ?? `${columnLabels[columnIndex]}${rowIndex + 1}`
 
     return (
       <div
         key={key}
         className={cn(
+          // ベーススタイル
           mergedStyles.cell.base,
+          // 選択状態
           isSelected && mergedStyles.cell.selected,
-          !isSelected && mergedStyles.cell.hover,
-          !isSelected && !isRangeBorder && !isActiveCell && mergedStyles.cell.border,
-          ((!isRangeSelection && isActiveCell) || (isRangeSelection && isStartCell)) && mergedStyles.cell.active
+          // 非選択時のホバーと境界線
+          !isSelected && [
+            mergedStyles.cell.hover,
+            mergedStyles.cell.border
+          ],
+          // アクティブセルまたは選択開始セルのスタイル
+          ((!isRangeSelection && isActiveCell) || (isRangeSelection && isStartCell)) && [
+            'border-2 border-blue-400',
+            '-m-[1px]',
+            mergedStyles.cell.active
+          ],
+          // 選択範囲の境界線
+          getBorderClasses(),
+          // カスタムクラス
+          cellClassName
         )}
-        style={cellStyle}
+        style={style}
         onMouseDown={(e) => handleMouseDown(rowIndex, columnIndex, e.shiftKey)}
       >
-        {`${columnLabels[columnIndex]}${rowIndex + 1}`}
+        {cellContent}
       </div>
     )
   }
 
   // ヘッダーセルをレンダリング
   const headerCellRenderer = ({ columnIndex, key, style }: GridCellProps) => {
-    const isSelected = isCellSelected(0, columnIndex)
+    const isSelected = selectionRange && columnIndex >= Math.min(selectionRange.start.col, selectionRange.end.col) &&
+                      columnIndex <= Math.max(selectionRange.start.col, selectionRange.end.col)
 
     return (
       <div
@@ -305,11 +288,10 @@ export default function Spreadsheet({
         className={cn(
           mergedStyles.header.base,
           mergedStyles.header.border,
-          isSelected ? mergedStyles.header.selected : mergedStyles.header.hover
+          isSelected ? mergedStyles.header.selected : mergedStyles.header.hover,
+          headerClassName
         )}
-        style={{
-          ...style,
-        }}
+        style={style}
         onMouseDown={(e) => handleHeaderMouseDown(columnIndex, false, e.shiftKey)}
       >
         {columnLabels[columnIndex]}
@@ -319,7 +301,8 @@ export default function Spreadsheet({
 
   // 行ヘッダーをレンダリング
   const rowHeaderRenderer = ({ key, rowIndex, style }: GridCellProps) => {
-    const isSelected = isCellSelected(rowIndex, 0)
+    const isSelected = selectionRange && rowIndex >= Math.min(selectionRange.start.row, selectionRange.end.row) &&
+                      rowIndex <= Math.max(selectionRange.start.row, selectionRange.end.row)
 
     return (
       <div
@@ -327,11 +310,10 @@ export default function Spreadsheet({
         className={cn(
           mergedStyles.header.base,
           mergedStyles.header.border,
-          isSelected ? mergedStyles.header.selected : mergedStyles.header.hover
+          isSelected ? mergedStyles.header.selected : mergedStyles.header.hover,
+          headerClassName
         )}
-        style={{
-          ...style,
-        }}
+        style={style}
         onMouseDown={(e) => handleHeaderMouseDown(rowIndex, true, e.shiftKey)}
       >
         {rowIndex + 1}
@@ -345,7 +327,7 @@ export default function Spreadsheet({
         <ScrollSync>
           {({ onScroll, scrollLeft, scrollTop }) => (
             <div 
-              className="relative outline-none" 
+              className={cn(gridStyles.container, className)}
               style={{ width, height }}
               onMouseUp={(e) => {
                 if (e.target === e.currentTarget) {
@@ -369,25 +351,25 @@ export default function Spreadsheet({
                 style={{ 
                   width: defaultColumnWidth,
                   height: headerHeight,
-                  zIndex: 20,
+                  zIndex: layoutStyles.zIndex.corner,
                 }}
                 onClick={handleCornerHeaderClick}
               />
 
               {/* 列ヘッダー */}
               <div 
-                className="absolute top-0"
+                className={cn(gridStyles.headerContainer)}
                 style={{ 
                   left: defaultColumnWidth,
                   width: width - defaultColumnWidth - scrollbarWidth,
                   height: headerHeight,
-                  zIndex: 10,
+                  zIndex: layoutStyles.zIndex.header,
                 }}
                 onMouseMove={(e: React.MouseEvent) => handleMouseMove(e.nativeEvent)}
               >
                 <Grid
                   ref={headerGridRef}
-                  className="outline-none"
+                  className={gridStyles.grid}
                   cellRenderer={headerCellRenderer}
                   columnCount={columnCount}
                   columnWidth={() => defaultColumnWidth}
@@ -396,26 +378,23 @@ export default function Spreadsheet({
                   rowHeight={() => headerHeight}
                   width={width - defaultColumnWidth - scrollbarWidth}
                   scrollLeft={scrollLeft}
-                  style={{
-                    overflowX: 'hidden',
-                    overflowY: 'hidden'
-                  }}
+                  style={layoutStyles.overflow.hidden}
                 />
               </div>
 
               {/* 行ヘッダー */}
               <div 
-                className="absolute left-0"
+                className={cn(gridStyles.rowHeaderContainer)}
                 style={{ 
                   top: headerHeight,
                   width: defaultColumnWidth,
                   height: height - headerHeight - scrollbarWidth,
-                  zIndex: 10,
+                  zIndex: layoutStyles.zIndex.header,
                 }}
                 onMouseMove={(e: React.MouseEvent) => handleMouseMove(e.nativeEvent)}
               >
                 <Grid
-                  className="outline-none"
+                  className={gridStyles.grid}
                   cellRenderer={rowHeaderRenderer}
                   columnCount={1}
                   columnWidth={() => defaultColumnWidth}
@@ -424,16 +403,13 @@ export default function Spreadsheet({
                   rowHeight={() => defaultRowHeight}
                   width={defaultColumnWidth}
                   scrollTop={scrollTop}
-                  style={{
-                    overflowX: 'hidden',
-                    overflowY: 'hidden'
-                  }}
+                  style={layoutStyles.overflow.hidden}
                 />
               </div>
 
               {/* メインのグリッド領域 */}
               <div
-                className="absolute"
+                className={cn(gridStyles.mainGridContainer)}
                 style={{
                   top: headerHeight,
                   left: defaultColumnWidth,
@@ -444,7 +420,7 @@ export default function Spreadsheet({
               >
                 <Grid
                   ref={mainGridRef}
-                  className="outline-none"
+                  className={gridStyles.grid}
                   cellRenderer={cellRenderer}
                   columnCount={columnCount}
                   columnWidth={() => defaultColumnWidth}
