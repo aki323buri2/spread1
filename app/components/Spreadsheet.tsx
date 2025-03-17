@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useRef, useCallback } from 'react'
+import React, { useRef, useCallback, useState } from 'react'
 import { AutoSizer, Grid, GridCellProps, ScrollSync } from 'react-virtualized'
 import { cn } from '@/lib/utils'
 import {
@@ -131,6 +131,12 @@ interface SpreadsheetProps extends
   
   // スタイリング
   styles?: SpreadsheetStyles
+
+  // デバッグモード
+  debug?: boolean
+
+  // 新しいプロパティ
+  onContextMenu?: (e: React.MouseEvent) => void
 }
 
 interface CellRendererProps extends GridCellProps {
@@ -142,6 +148,26 @@ interface CellRendererProps extends GridCellProps {
   onMouseDown: (e: React.MouseEvent) => void
   onDoubleClick?: (e: React.MouseEvent) => void
   onContextMenu?: (e: React.MouseEvent) => void
+}
+
+// デバッグ情報表示用コンポーネント
+interface DebugOverlayProps {
+  mousePosition: { x: number; y: number } | null
+  scrollSpeed: { x: number; y: number }
+  containerSize: { width: number; height: number } | null
+}
+
+const DebugOverlay: React.FC<DebugOverlayProps> = ({ mousePosition, scrollSpeed, containerSize }) => {
+  return (
+    <div className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-lg font-mono text-sm z-50">
+      <div>Mouse X: {mousePosition?.x ?? 'N/A'}</div>
+      <div>Mouse Y: {mousePosition?.y ?? 'N/A'}</div>
+      <div>Scroll Speed X: {scrollSpeed.x.toFixed(2)}</div>
+      <div>Scroll Speed Y: {scrollSpeed.y.toFixed(2)}</div>
+      <div>Container Width: {containerSize?.width ?? 'N/A'}</div>
+      <div>Container Height: {containerSize?.height ?? 'N/A'}</div>
+    </div>
+  )
 }
 
 export default function Spreadsheet({ 
@@ -160,6 +186,8 @@ export default function Spreadsheet({
   headerRenderer: customHeaderRenderer,
   columnLabels = DEFAULT_COLUMN_LABELS,
   data,
+  debug = false,
+  onContextMenu,
   // イベントハンドラ
   onSelectionChange,
   onActivePositionChange,
@@ -177,6 +205,11 @@ export default function Spreadsheet({
 }: SpreadsheetProps) {
   const headerGridRef = useRef<Grid>(null)
   const mainGridRef = useRef<Grid>(null)
+  const [debugInfo, setDebugInfo] = useState({
+    mousePosition: null as { x: number; y: number } | null,
+    scrollSpeed: { x: 0, y: 0 },
+    containerSize: null as { width: number; height: number } | null
+  })
 
   const {
     selectedCell,
@@ -187,10 +220,23 @@ export default function Spreadsheet({
     isCellSelected,
     handleMouseMove,
     handleCornerHeaderClick,
+    handleCellClick,
+    handleCellDoubleClick,
+    handleCellContextMenu,
   } = useSpreadsheetSelection({
     rowCount,
     columnCount,
     gridRef: mainGridRef,
+    defaultRowHeight,
+    defaultColumnWidth,
+    headerHeight,
+    headerWidth,
+    onSelectionChange,
+    onActivePositionChange,
+    onCellClick,
+    onCellDoubleClick,
+    onCellContextMenu,
+    onDebugInfoChange: setDebugInfo,
   })
 
   // スタイルの結合
@@ -322,121 +368,137 @@ export default function Spreadsheet({
   }
 
   return (
-    <AutoSizer>
-      {({ width, height }) => (
-        <ScrollSync>
-          {({ onScroll, scrollLeft, scrollTop }) => (
-            <div 
-              className={cn(gridStyles.container, className)}
-              style={{ width, height }}
-              onMouseUp={(e) => {
-                if (e.target === e.currentTarget) {
-                  handleClearSelection()
-                }
+    <>
+      <div className={cn('relative w-full h-full overflow-hidden', className)}>
+        <AutoSizer>
+          {({ width, height }) => (
+            <ScrollSync>
+              {({ onScroll, scrollLeft, scrollTop }) => {
+                // スクロール可能な領域のサイズを計算
+                const scrollableWidth = width - defaultColumnWidth
+                const scrollableHeight = height - headerHeight
+                const totalWidth = columnCount * defaultColumnWidth
+                const totalHeight = rowCount * defaultRowHeight
+
+                return (
+                  <div 
+                    className="relative w-full h-full"
+                    style={{ 
+                      width,
+                      height
+                    }}
+                    onMouseUp={(e) => {
+                      if (e.target === e.currentTarget) {
+                        handleClearSelection()
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                        e.preventDefault()
+                      }
+                    }}
+                    tabIndex={0}
+                  >
+                    {/* 左上の空白セル */}
+                    <div 
+                      className={cn(
+                        'absolute top-0 left-0',
+                        mergedStyles.corner.base,
+                        mergedStyles.corner.hover
+                      )}
+                      style={{ 
+                        width: defaultColumnWidth,
+                        height: headerHeight,
+                        zIndex: layoutStyles.zIndex.corner,
+                      }}
+                      onClick={handleCornerHeaderClick}
+                    />
+
+                    {/* 列ヘッダー */}
+                    <div 
+                      className="absolute top-0"
+                      style={{ 
+                        left: defaultColumnWidth,
+                        right: 0,
+                        height: headerHeight,
+                        zIndex: layoutStyles.zIndex.header,
+                      }}
+                    >
+                      <Grid
+                        ref={headerGridRef}
+                        className={gridStyles.grid}
+                        cellRenderer={headerCellRenderer}
+                        columnCount={columnCount}
+                        columnWidth={() => defaultColumnWidth}
+                        height={headerHeight}
+                        rowCount={1}
+                        rowHeight={() => headerHeight}
+                        width={scrollableWidth}
+                        scrollLeft={scrollLeft}
+                        style={{ overflow: 'hidden' }}
+                      />
+                    </div>
+
+                    {/* 行ヘッダー */}
+                    <div 
+                      className="absolute left-0"
+                      style={{ 
+                        top: headerHeight,
+                        bottom: 0,
+                        width: defaultColumnWidth,
+                        zIndex: layoutStyles.zIndex.header,
+                      }}
+                    >
+                      <Grid
+                        className={gridStyles.grid}
+                        cellRenderer={rowHeaderRenderer}
+                        columnCount={1}
+                        columnWidth={() => defaultColumnWidth}
+                        height={scrollableHeight}
+                        rowCount={rowCount}
+                        rowHeight={() => defaultRowHeight}
+                        width={defaultColumnWidth}
+                        scrollTop={scrollTop}
+                        style={{ overflow: 'hidden' }}
+                      />
+                    </div>
+
+                    {/* メインのグリッド領域 */}
+                    <div
+                      className="absolute"
+                      style={{
+                        top: headerHeight,
+                        left: defaultColumnWidth,
+                        right: 0,
+                        bottom: 0,
+                      }}
+                    >
+                      <Grid
+                        ref={mainGridRef}
+                        className={gridStyles.grid}
+                        cellRenderer={cellRenderer}
+                        columnCount={columnCount}
+                        columnWidth={() => defaultColumnWidth}
+                        height={scrollableHeight}
+                        rowCount={rowCount}
+                        rowHeight={() => defaultRowHeight}
+                        width={scrollableWidth}
+                        onScroll={onScroll}
+                        overscanRowCount={20}
+                        overscanColumnCount={5}
+                        style={{ 
+                          overflow: 'auto'
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
               }}
-              onKeyDown={(e) => {
-                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-                  e.preventDefault()
-                }
-              }}
-              tabIndex={0}
-            >
-              {/* 左上の空白セル */}
-              <div 
-                className={cn(
-                  'absolute top-0 left-0',
-                  mergedStyles.corner.base,
-                  mergedStyles.corner.hover
-                )}
-                style={{ 
-                  width: defaultColumnWidth,
-                  height: headerHeight,
-                  zIndex: layoutStyles.zIndex.corner,
-                }}
-                onClick={handleCornerHeaderClick}
-              />
-
-              {/* 列ヘッダー */}
-              <div 
-                className={cn(gridStyles.headerContainer)}
-                style={{ 
-                  left: defaultColumnWidth,
-                  width: width - defaultColumnWidth - scrollbarWidth,
-                  height: headerHeight,
-                  zIndex: layoutStyles.zIndex.header,
-                }}
-                onMouseMove={(e: React.MouseEvent) => handleMouseMove(e.nativeEvent)}
-              >
-                <Grid
-                  ref={headerGridRef}
-                  className={gridStyles.grid}
-                  cellRenderer={headerCellRenderer}
-                  columnCount={columnCount}
-                  columnWidth={() => defaultColumnWidth}
-                  height={headerHeight}
-                  rowCount={1}
-                  rowHeight={() => headerHeight}
-                  width={width - defaultColumnWidth - scrollbarWidth}
-                  scrollLeft={scrollLeft}
-                  style={layoutStyles.overflow.hidden}
-                />
-              </div>
-
-              {/* 行ヘッダー */}
-              <div 
-                className={cn(gridStyles.rowHeaderContainer)}
-                style={{ 
-                  top: headerHeight,
-                  width: defaultColumnWidth,
-                  height: height - headerHeight - scrollbarWidth,
-                  zIndex: layoutStyles.zIndex.header,
-                }}
-                onMouseMove={(e: React.MouseEvent) => handleMouseMove(e.nativeEvent)}
-              >
-                <Grid
-                  className={gridStyles.grid}
-                  cellRenderer={rowHeaderRenderer}
-                  columnCount={1}
-                  columnWidth={() => defaultColumnWidth}
-                  height={height - headerHeight - scrollbarWidth}
-                  rowCount={rowCount}
-                  rowHeight={() => defaultRowHeight}
-                  width={defaultColumnWidth}
-                  scrollTop={scrollTop}
-                  style={layoutStyles.overflow.hidden}
-                />
-              </div>
-
-              {/* メインのグリッド領域 */}
-              <div
-                className={cn(gridStyles.mainGridContainer)}
-                style={{
-                  top: headerHeight,
-                  left: defaultColumnWidth,
-                  right: 0,
-                  bottom: 0,
-                }}
-                onMouseMove={(e: React.MouseEvent) => handleMouseMove(e.nativeEvent)}
-              >
-                <Grid
-                  ref={mainGridRef}
-                  className={gridStyles.grid}
-                  cellRenderer={cellRenderer}
-                  columnCount={columnCount}
-                  columnWidth={() => defaultColumnWidth}
-                  height={height - headerHeight}
-                  rowCount={rowCount}
-                  rowHeight={() => defaultRowHeight}
-                  width={width - defaultColumnWidth}
-                  overscanRowCount={20}
-                  overscanColumnCount={5}
-                  onScroll={onScroll}
-                />
-              </div>
-            </div>
+            </ScrollSync>
           )}
-        </ScrollSync>
-      )}
-    </AutoSizer>
+        </AutoSizer>
+      </div>
+      {debug && <DebugOverlay {...debugInfo} />}
+    </>
   )
 } 

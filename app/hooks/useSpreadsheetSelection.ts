@@ -29,6 +29,11 @@ interface UseSpreadsheetSelectionProps {
   onCellClick?: (position: CellPosition) => void
   onCellDoubleClick?: (position: CellPosition) => void
   onCellContextMenu?: (position: CellPosition, event: React.MouseEvent) => void
+  onDebugInfoChange?: (info: { 
+    mousePosition: { x: number; y: number } | null
+    scrollSpeed: { x: number; y: number }
+    containerSize: { width: number; height: number } | null
+  }) => void
 }
 
 export function useSpreadsheetSelection({
@@ -44,6 +49,7 @@ export function useSpreadsheetSelection({
   onCellClick,
   onCellDoubleClick,
   onCellContextMenu,
+  onDebugInfoChange,
 }: UseSpreadsheetSelectionProps) {
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null)
   const [selectionRange, setSelectionRange] = useState<CellRange | null>(null)
@@ -52,6 +58,11 @@ export function useSpreadsheetSelection({
   const lastMousePositionRef = useRef<{ x: number; y: number; rect: DOMRect } | null>(null)
   const headerDragTypeRef = useRef<'row' | 'column' | null>(null)
   const isHeaderDragRef = useRef(false)  // ヘッダーからのドラッグかどうかを追跡
+  const [debugInfo, setDebugInfo] = useState({
+    mousePosition: null as { x: number; y: number } | null,
+    scrollSpeed: { x: 0, y: 0 },
+    containerSize: null as { width: number; height: number } | null
+  })
 
   const moveCell = useCallback((key: string, ctrlKey: boolean, shiftKey: boolean) => {
     if (!selectedCell) return
@@ -292,6 +303,118 @@ export function useSpreadsheetSelection({
     })
   }, [rowCount, columnCount])
 
+  const updateSelectionRange = useCallback((mouseX: number, mouseY: number, scrollLeft: number, scrollTop: number) => {
+    const col = Math.min(Math.max(0, Math.floor((mouseX + scrollLeft) / defaultColumnWidth)), columnCount - 1)
+    const row = Math.min(Math.max(0, Math.floor((mouseY + scrollTop) / defaultRowHeight)), rowCount - 1)
+
+    setSelectionRange(prev => {
+      if (!prev) return null
+
+      let newRange: CellRange
+      if (headerDragTypeRef.current === 'row') {
+        newRange = {
+          start: prev.start,
+          end: { row, col: columnCount - 1 }
+        }
+      } else if (headerDragTypeRef.current === 'column') {
+        newRange = {
+          start: prev.start,
+          end: { row: rowCount - 1, col }
+        }
+      } else {
+        newRange = {
+          start: prev.start,
+          end: { row, col }
+        }
+      }
+
+      setSelectedCell(newRange.end)
+      return newRange
+    })
+  }, [columnCount, rowCount, defaultColumnWidth, defaultRowHeight])
+
+  const startScrolling = useCallback(() => {
+    if (!lastMousePositionRef.current || !gridRef.current) return
+
+    const scroll = () => {
+      // ドラッグ終了時のみスクロールを停止
+      if (!isDraggingRef.current) {
+        rafRef.current = null
+        setDebugInfo(prev => ({ ...prev, scrollSpeed: { x: 0, y: 0 } }))
+        return
+      }
+
+      // グリッドの参照が失われた場合は安全に終了
+      if (!gridRef.current || !lastMousePositionRef.current) {
+        rafRef.current = null
+        return
+      }
+
+      const { x: mouseX, y: mouseY, rect } = lastMousePositionRef.current
+      const container = (gridRef.current as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer
+      const grid = gridRef.current
+
+      // スクロール速度を計算（改善版）
+      const calculateScrollSpeed = (position: number, size: number, threshold = 50) => {
+        // 境界からの距離を計算
+        const distanceFromEdge = position < 0 
+          ? -position 
+          : position > size 
+            ? position - size 
+            : 0
+
+        if (distanceFromEdge === 0) return 0
+
+        // 基本速度を調整（より滑らかなスクロールのため）
+        const baseSpeed = 1
+        // 加速度を調整（より自然な加速を実現）
+        const acceleration = 0.15
+        // 最大速度を調整
+        const maxSpeed = 30
+
+        // 距離に応じた速度計算（二次関数的な加速）
+        const speed = baseSpeed + (Math.pow(distanceFromEdge * acceleration, 1.5))
+        
+        // 方向を考慮して速度を返す
+        return position < 0 
+          ? -Math.min(speed, maxSpeed)
+          : Math.min(speed, maxSpeed)
+      }
+
+      const scrollSpeedX = calculateScrollSpeed(mouseX, rect.width)
+      const scrollSpeedY = calculateScrollSpeed(mouseY, rect.height)
+
+      // デバッグ情報を更新
+      setDebugInfo(prev => ({
+        ...prev,
+        scrollSpeed: { x: scrollSpeedX, y: scrollSpeedY }
+      }))
+
+      // スクロール位置の更新
+      const currentScrollLeft = container.scrollLeft
+      const currentScrollTop = container.scrollTop
+      const maxScrollLeft = (columnCount * defaultColumnWidth) - rect.width
+      const maxScrollTop = (rowCount * defaultRowHeight) - rect.height
+
+      // 新しいスクロール位置を計算
+      const newScrollLeft = Math.max(0, Math.min(maxScrollLeft, currentScrollLeft + scrollSpeedX))
+      const newScrollTop = Math.max(0, Math.min(maxScrollTop, currentScrollTop + scrollSpeedY))
+
+      // スクロール位置が変更された場合のみ更新
+      if (newScrollLeft !== currentScrollLeft || newScrollTop !== currentScrollTop) {
+        grid.scrollToPosition({ scrollLeft: newScrollLeft, scrollTop: newScrollTop })
+        // 選択範囲を更新
+        updateSelectionRange(mouseX, mouseY, newScrollLeft, newScrollTop)
+      }
+
+      // 次のフレームを常にスケジュール（スクロール速度が0でも継続）
+      rafRef.current = requestAnimationFrame(scroll)
+    }
+
+    // 初回のスクロールを開始
+    rafRef.current = requestAnimationFrame(scroll)
+  }, [columnCount, rowCount, defaultColumnWidth, defaultRowHeight, updateSelectionRange])
+
   const handleMouseMove = useCallback((e: globalThis.MouseEvent) => {
     if (!isDraggingRef.current || !gridRef.current) return
 
@@ -305,166 +428,47 @@ export function useSpreadsheetSelection({
 
     // ヘッダー部分のドラッグ時は座標を補正
     if (headerDragTypeRef.current === 'row') {
-      // 行ヘッダーの場合、Y座標はメインのグリッド領域基準のまま、X座標は0から開始
       mouseX = 0
     } else if (headerDragTypeRef.current === 'column') {
-      // 列ヘッダーの場合、X座標はメインのグリッド領域基準のまま、Y座標は0から開始
       mouseY = 0
     }
 
-    // 表示枠内の場合は直接選択範囲を更新
-    const col = Math.min(Math.max(0, Math.floor((mouseX + container.scrollLeft) / COLUMN_WIDTH)), columnCount - 1)
-    const row = Math.min(Math.max(0, Math.floor((mouseY + container.scrollTop) / ROW_HEIGHT)), rowCount - 1)
-
-    setSelectionRange(prev => {
-      if (!prev) return null
-
-      let newRange: CellRange
-      if (headerDragTypeRef.current === 'row') {
-        // 行ヘッダーのドラッグ
-        newRange = {
-          start: prev.start,
-          end: { row, col: columnCount - 1 }
-        }
-      } else if (headerDragTypeRef.current === 'column') {
-        // 列ヘッダーのドラッグ
-        newRange = {
-          start: prev.start,
-          end: { row: rowCount - 1, col }
-        }
-      } else {
-        // 通常のセルのドラッグ
-        newRange = {
-          start: prev.start,
-          end: { row, col }
-        }
-      }
-
-      // 選択範囲に応じてselectedCellを更新
-      setSelectedCell(newRange.end)
-      return newRange
-    })
-
-    // マウス位置の状態を更新（表示枠外スクロール用）
+    // マウス位置の状態を更新
     lastMousePositionRef.current = {
       x: mouseX,
       y: mouseY,
       rect: mainGridRect
     }
 
-    // 表示枠外の場合はスクロールを開始
-    if (mouseX < 0 || mouseX > mainGridRect.width || mouseY < 0 || mouseY > mainGridRect.height) {
+    // デバッグ情報を更新
+    setDebugInfo(prev => ({
+      ...prev,
+      mousePosition: { x: mouseX, y: mouseY },
+      containerSize: { width: mainGridRect.width, height: mainGridRect.height }
+    }))
+
+    // スクロールの開始判定を改善
+    const isOutsideGrid = mouseX < 0 || mouseX > mainGridRect.width || 
+                         mouseY < 0 || mouseY > mainGridRect.height
+
+    if (isOutsideGrid && !rafRef.current) {
       startScrolling()
     }
-  }, [columnCount, rowCount])
 
-  const startScrolling = useCallback(() => {
-    if (!lastMousePositionRef.current || !gridRef.current) return
-
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current)
-    }
-
-    const scroll = () => {
-      if (!isDraggingRef.current || !gridRef.current || !lastMousePositionRef.current) return
-
-      const { x: mouseX, y: mouseY, rect } = lastMousePositionRef.current
-      const container = (gridRef.current as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer
-      const grid = gridRef.current
-
-      // スクロール速度を計算（マウス位置に基づいて加速）
-      const calculateScrollSpeed = (position: number, size: number, threshold = 50) => {
-        // 境界からの距離
-        const distanceFromEdge = position < 0 
-          ? -position 
-          : position > size 
-            ? position - size 
-            : 0
-
-        if (distanceFromEdge === 0) return 0
-
-        // 基本速度（ピクセル/フレーム）
-        const baseSpeed = 2
-        // 加速度係数
-        const acceleration = 0.1
-        // 最大速度
-        const maxSpeed = 25
-
-        // 距離に応じて加速
-        const speed = baseSpeed + (distanceFromEdge * acceleration)
-        
-        // 方向を考慮して速度を返す
-        return position < 0 
-          ? -Math.min(speed, maxSpeed)
-          : Math.min(speed, maxSpeed)
-      }
-
-      const scrollSpeedX = calculateScrollSpeed(mouseX, rect.width)
-      const scrollSpeedY = calculateScrollSpeed(mouseY, rect.height)
-
-      const currentScrollLeft = container.scrollLeft
-      const currentScrollTop = container.scrollTop
-      const maxScrollLeft = (columnCount * defaultColumnWidth) - rect.width
-      const maxScrollTop = (rowCount * defaultRowHeight) - rect.height
-
-      // スクロール位置を更新
-      const newScrollLeft = Math.max(0, Math.min(maxScrollLeft, currentScrollLeft + scrollSpeedX))
-      const newScrollTop = Math.max(0, Math.min(maxScrollTop, currentScrollTop + scrollSpeedY))
-
-      if (newScrollLeft !== currentScrollLeft || newScrollTop !== currentScrollTop) {
-        // スクロール位置に基づいてセル位置を計算
-        const targetCol = Math.min(
-          Math.max(0, Math.floor((mouseX + newScrollLeft) / defaultColumnWidth)),
-          columnCount - 1
-        )
-        const targetRow = Math.min(
-          Math.max(0, Math.floor((mouseY + newScrollTop) / defaultRowHeight)),
-          rowCount - 1
-        )
-
-        // スクロール位置を更新
-        grid.scrollToPosition({ scrollLeft: newScrollLeft, scrollTop: newScrollTop })
-
-        // 選択範囲を更新
-        setSelectionRange(prev => {
-          if (!prev) return null
-
-          if (headerDragTypeRef.current === 'row') {
-            return {
-              start: prev.start,
-              end: { row: targetRow, col: columnCount - 1 }
-            }
-          } else if (headerDragTypeRef.current === 'column') {
-            return {
-              start: prev.start,
-              end: { row: rowCount - 1, col: targetCol }
-            }
-          } else {
-            return {
-              start: prev.start,
-              end: { row: targetRow, col: targetCol }
-            }
-          }
-        })
-
-        // 選択範囲の終点を更新
-        setSelectedCell({ row: targetRow, col: targetCol })
-      }
-
-      // スクロールが必要な場合は次のフレームをスケジュール
-      if (scrollSpeedX !== 0 || scrollSpeedY !== 0) {
-        rafRef.current = requestAnimationFrame(scroll)
-      }
-    }
-
-    rafRef.current = requestAnimationFrame(scroll)
-  }, [columnCount, rowCount, defaultColumnWidth, defaultRowHeight])
+    // 表示枠内の場合は直接選択範囲を更新
+    updateSelectionRange(mouseX, mouseY, container.scrollLeft, container.scrollTop)
+  }, [columnCount, rowCount, startScrolling, updateSelectionRange])
 
   const handleMouseUp = useCallback(() => {
     isDraggingRef.current = false
     headerDragTypeRef.current = null
-    isHeaderDragRef.current = false  // ヘッダードラッグ状態をリセット
+    isHeaderDragRef.current = false
     lastMousePositionRef.current = null
+    setDebugInfo(prev => ({
+      ...prev,
+      mousePosition: null,
+      scrollSpeed: { x: 0, y: 0 }
+    }))
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
       if (gridRef.current) {
@@ -526,6 +530,11 @@ export function useSpreadsheetSelection({
   const handleCellContextMenu = useCallback((row: number, col: number, event: React.MouseEvent) => {
     onCellContextMenu?.({ row, col }, event)
   }, [onCellContextMenu])
+
+  // デバッグ情報が変更されたときにコールバックを呼び出す
+  useEffect(() => {
+    onDebugInfoChange?.(debugInfo)
+  }, [debugInfo, onDebugInfoChange])
 
   return {
     selectedCell,

@@ -58,10 +58,10 @@ export const cornerStyles = {
 
 // グリッドの基本スタイル
 export const gridStyles = {
-  container: 'relative outline-none',
-  headerContainer: 'absolute top-0',
-  rowHeaderContainer: 'absolute left-0',
-  mainGridContainer: 'absolute',
+  container: 'relative w-full h-full',
+  headerContainer: 'absolute overflow-hidden',
+  rowHeaderContainer: 'absolute overflow-hidden',
+  mainGridContainer: 'absolute overflow-hidden',
   grid: 'outline-none'
 } as const
 
@@ -77,8 +77,8 @@ export const layoutStyles = {
   },
   overflow: {
     hidden: {
-      overflowX: 'hidden',
-      overflowY: 'hidden'
+      overflowX: 'auto',
+      overflowY: 'auto'
     }
   }
 } as const
