@@ -63,6 +63,33 @@ export function useSpreadsheetSelection({
     scrollSpeed: { x: 0, y: 0 },
     containerSize: null as { width: number; height: number } | null
   })
+  
+  // デバッグ情報更新用のタイマー参照
+  const debugUpdateTimerRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // デバッグ情報を節約して更新する関数
+  const updateDebugInfo = useCallback((newInfo: Partial<typeof debugInfo>) => {
+    if (debugUpdateTimerRef.current) {
+      clearTimeout(debugUpdateTimerRef.current)
+    }
+    
+    debugUpdateTimerRef.current = setTimeout(() => {
+      setDebugInfo(prev => ({
+        ...prev,
+        ...newInfo
+      }))
+      debugUpdateTimerRef.current = null
+    }, 100) // 100ms間隔でのみ更新
+  }, [])
+
+  // コンポーネントのクリーンアップ時にタイマーをクリア
+  useEffect(() => {
+    return () => {
+      if (debugUpdateTimerRef.current) {
+        clearTimeout(debugUpdateTimerRef.current)
+      }
+    }
+  }, [])
 
   const moveCell = useCallback((key: string, ctrlKey: boolean, shiftKey: boolean) => {
     if (!selectedCell) return
@@ -134,6 +161,8 @@ export function useSpreadsheetSelection({
     if (isHeaderDragRef.current) return
 
     isDraggingRef.current = true
+    console.log('🔵 Drag started: normal cell', { row, col, shiftKey })
+    
     if (shiftKey && selectedCell) {
       // Shiftキーが押されている場合は選択範囲を拡張
       setSelectionRange({
@@ -196,6 +225,7 @@ export function useSpreadsheetSelection({
     isDraggingRef.current = true
     headerDragTypeRef.current = isRow ? 'row' : 'column'
     isHeaderDragRef.current = true  // ヘッダーからのドラッグを記録
+    console.log('🔵 Drag started: header', { index, isRow, shiftKey })
 
     if (isRow) {
       // 行ヘッダーのクリック
@@ -334,11 +364,24 @@ export function useSpreadsheetSelection({
   }, [columnCount, rowCount, defaultColumnWidth, defaultRowHeight])
 
   const startScrolling = useCallback(() => {
+    console.log('startScrolling called', {
+      lastMousePosition: lastMousePositionRef.current,
+      isDragging: isDraggingRef.current,
+      gridRef: !!gridRef.current
+    })
+
     if (!lastMousePositionRef.current || !gridRef.current) return
 
     const scroll = () => {
+      // デバッグ用にスクロールループの実行を確認
+      console.log('scroll loop running', {
+        isDragging: isDraggingRef.current,
+        mousePosition: lastMousePositionRef.current
+      })
+
       // ドラッグ終了時のみスクロールを停止
       if (!isDraggingRef.current) {
+        console.log('stopping scroll: drag ended')
         rafRef.current = null
         setDebugInfo(prev => ({ ...prev, scrollSpeed: { x: 0, y: 0 } }))
         return
@@ -346,6 +389,7 @@ export function useSpreadsheetSelection({
 
       // グリッドの参照が失われた場合は安全に終了
       if (!gridRef.current || !lastMousePositionRef.current) {
+        console.log('stopping scroll: lost references')
         rafRef.current = null
         return
       }
@@ -384,7 +428,8 @@ export function useSpreadsheetSelection({
       const scrollSpeedX = calculateScrollSpeed(mouseX, rect.width)
       const scrollSpeedY = calculateScrollSpeed(mouseY, rect.height)
 
-      // デバッグ情報を更新
+      // デバッグ情報を更新（計算された速度を確認）
+      console.log('calculated speeds', { scrollSpeedX, scrollSpeedY, mouseX, mouseY, rect })
       setDebugInfo(prev => ({
         ...prev,
         scrollSpeed: { x: scrollSpeedX, y: scrollSpeedY }
@@ -416,7 +461,16 @@ export function useSpreadsheetSelection({
   }, [columnCount, rowCount, defaultColumnWidth, defaultRowHeight, updateSelectionRange])
 
   const handleMouseMove = useCallback((e: globalThis.MouseEvent) => {
-    if (!isDraggingRef.current || !gridRef.current) return
+    if (!isDraggingRef.current || !gridRef.current) {
+      return
+    }
+
+    // isDraggingがtrueの場合のみ出力
+    console.log('🟡 Dragging in progress', {
+      isDragging: isDraggingRef.current,
+      headerDragType: headerDragTypeRef.current,
+      hasRaf: !!rafRef.current
+    })
 
     const grid = gridRef.current
     const container = (grid as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer
@@ -433,49 +487,63 @@ export function useSpreadsheetSelection({
       mouseY = 0
     }
 
-    // マウス位置の状態を更新
+    // マウス位置の状態を更新（rectも更新）
     lastMousePositionRef.current = {
       x: mouseX,
       y: mouseY,
       rect: mainGridRect
     }
 
-    // デバッグ情報を更新
-    setDebugInfo(prev => ({
-      ...prev,
+    // デバッグ情報を更新（スロットリング適用）
+    updateDebugInfo({
       mousePosition: { x: mouseX, y: mouseY },
       containerSize: { width: mainGridRect.width, height: mainGridRect.height }
-    }))
+    })
 
     // スクロールの開始判定を改善
     const isOutsideGrid = mouseX < 0 || mouseX > mainGridRect.width || 
                          mouseY < 0 || mouseY > mainGridRect.height
 
-    if (isOutsideGrid && !rafRef.current) {
+    console.log('mouse move check', { 
+      isOutsideGrid, 
+      hasRaf: !!rafRef.current, 
+      mouseX, 
+      mouseY,
+      isDragging: isDraggingRef.current,
+      headerDragType: headerDragTypeRef.current
+    })
+
+    if (isOutsideGrid) {
+      console.log('attempting to start scroll')
       startScrolling()
     }
 
     // 表示枠内の場合は直接選択範囲を更新
     updateSelectionRange(mouseX, mouseY, container.scrollLeft, container.scrollTop)
-  }, [columnCount, rowCount, startScrolling, updateSelectionRange])
+  }, [columnCount, rowCount, startScrolling, updateSelectionRange, updateDebugInfo])
 
   const handleMouseUp = useCallback(() => {
+    if (isDraggingRef.current) {
+      console.log('🔴 Drag ended')
+    }
     isDraggingRef.current = false
     headerDragTypeRef.current = null
     isHeaderDragRef.current = false
     lastMousePositionRef.current = null
-    setDebugInfo(prev => ({
-      ...prev,
+    
+    // デバッグ情報を更新（スロットリング適用）
+    updateDebugInfo({
       mousePosition: null,
       scrollSpeed: { x: 0, y: 0 }
-    }))
+    })
+    
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
       if (gridRef.current) {
         gridRef.current.recomputeGridSize()
       }
     }
-  }, [])
+  }, [updateDebugInfo])
 
   const isCellSelected = useCallback((row: number, col: number) => {
     if (selectionRange) {
