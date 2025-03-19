@@ -91,32 +91,30 @@ export function useSpreadsheetSelection({
         const col = Math.min(Math.max(0, Math.floor((mouseX + scrollLeft) / COLUMN_WIDTH)), columnCount - 1)
         const row = Math.min(Math.max(0, Math.floor((mouseY + scrollTop) / ROW_HEIGHT)), rowCount - 1)
 
-        // バッチ更新で選択範囲を更新
-        requestAnimationFrame(() => {
-          setSelectionRange(prev => {
-            if (!prev) return null
+        // 選択範囲を更新
+        setSelectionRange(prev => {
+          if (!prev) return null
 
-            let newRange: CellRange
-            if (headerDragTypeRef.current === 'row') {
-              newRange = {
-                start: prev.start,
-                end: { row, col: columnCount - 1 }
-              }
-            } else if (headerDragTypeRef.current === 'column') {
-              newRange = {
-                start: prev.start,
-                end: { row: rowCount - 1, col }
-              }
-            } else {
-              newRange = {
-                start: prev.start,
-                end: { row, col }
-              }
+          let newRange: CellRange
+          if (headerDragTypeRef.current === 'row') {
+            newRange = {
+              start: prev.start,
+              end: { row, col: columnCount - 1 }
             }
+          } else if (headerDragTypeRef.current === 'column') {
+            newRange = {
+              start: prev.start,
+              end: { row: rowCount - 1, col }
+            }
+          } else {
+            newRange = {
+              start: prev.start,
+              end: { row, col }
+            }
+          }
 
-            setSelectedCell(newRange.end)
-            return newRange
-          })
+          setSelectedCell(newRange.end)
+          return newRange
         })
       }
     }
@@ -389,6 +387,7 @@ export function useSpreadsheetSelection({
     const col = Math.min(Math.max(0, Math.floor((mouseX + container.scrollLeft) / COLUMN_WIDTH)), columnCount - 1)
     const row = Math.min(Math.max(0, Math.floor((mouseY + container.scrollTop) / ROW_HEIGHT)), rowCount - 1)
 
+    // 選択範囲を直接更新
     setSelectionRange(prev => {
       if (!prev) return null
 
@@ -416,11 +415,48 @@ export function useSpreadsheetSelection({
   }, [columnCount, rowCount, handleScrollMouseMove])
 
   const handleMouseUp = useCallback(() => {
+    // 最後の選択状態を確実に更新
+    if (isDraggingRef.current && lastMousePositionRef.current && gridRef.current) {
+      const container = (gridRef.current as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer
+      const { x: mouseX, y: mouseY } = lastMousePositionRef.current
+      const col = Math.min(Math.max(0, Math.floor((mouseX + container.scrollLeft) / COLUMN_WIDTH)), columnCount - 1)
+      const row = Math.min(Math.max(0, Math.floor((mouseY + container.scrollTop) / ROW_HEIGHT)), rowCount - 1)
+
+      setSelectionRange(prev => {
+        if (!prev) return null
+
+        let newRange: CellRange
+        if (headerDragTypeRef.current === 'row') {
+          newRange = {
+            start: prev.start,
+            end: { row, col: columnCount - 1 }
+          }
+        } else if (headerDragTypeRef.current === 'column') {
+          newRange = {
+            start: prev.start,
+            end: { row: rowCount - 1, col }
+          }
+        } else {
+          newRange = {
+            start: prev.start,
+            end: { row, col }
+          }
+        }
+
+        setSelectedCell(newRange.end)
+        return newRange
+      })
+    }
+
+    // ドラッグ状態をリセット
     isDraggingRef.current = false
     headerDragTypeRef.current = null
-    isHeaderDragRef.current = false  // ヘッダードラッグ状態をリセット
+    isHeaderDragRef.current = false
+    lastMousePositionRef.current = null
+
+    // スクロールを停止
     stopScrolling()
-  }, [stopScrolling])
+  }, [columnCount, rowCount, stopScrolling])
 
   const isCellSelected = useCallback((row: number, col: number) => {
     if (selectionRange) {
@@ -471,6 +507,15 @@ export function useSpreadsheetSelection({
     onCellContextMenu?.({ row, col }, event)
   }, [onCellContextMenu])
 
+  const debugInfo: DebugInfo = {
+    mousePosition: lastMousePositionRef.current,
+    containerSize: gridRef.current ? {
+      width: (gridRef.current as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer.clientWidth,
+      height: (gridRef.current as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer.clientHeight
+    } : null,
+    scrollSpeed: { x: 0, y: 0 },
+  }
+
   return {
     selectedCell,
     selectionRange,
@@ -483,5 +528,6 @@ export function useSpreadsheetSelection({
     handleCellClick,
     handleCellDoubleClick,
     handleCellContextMenu,
+    debugInfo,
   }
 } 

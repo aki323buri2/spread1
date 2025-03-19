@@ -170,7 +170,11 @@ export function useSpreadsheetScroll({
       if (newScrollLeft !== currentScrollLeft || newScrollTop !== currentScrollTop) {
         // スクロール位置の更新と通知を同期して実行
         grid.scrollToPosition({ scrollLeft: newScrollLeft, scrollTop: newScrollTop })
-        onScroll?.(newScrollLeft, newScrollTop)
+        
+        // スクロール位置の変更を通知する前に、次のフレームをスケジュール
+        requestAnimationFrame(() => {
+          onScroll?.(newScrollLeft, newScrollTop)
+        })
       }
 
       // スクロールが必要な場合は次のフレームをスケジュール

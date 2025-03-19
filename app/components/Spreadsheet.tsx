@@ -187,6 +187,7 @@ export default function Spreadsheet({
     isCellSelected,
     handleMouseMove,
     handleCornerHeaderClick,
+    debugInfo,
   } = useSpreadsheetSelection({
     rowCount,
     columnCount,
@@ -432,6 +433,48 @@ export default function Spreadsheet({
                   overscanColumnCount={5}
                   onScroll={onScroll}
                 />
+              </div>
+
+              {/* デバッグ情報 */}
+              <div 
+                className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-lg font-mono text-sm z-50"
+                style={{ minWidth: '300px' }}
+              >
+                <h3 className="font-bold mb-2">デバッグ情報</h3>
+                <div className="space-y-1">
+                  <div>
+                    <span className="text-gray-400">マウス位置: </span>
+                    {debugInfo.mousePosition ? (
+                      `${Math.round(debugInfo.mousePosition.x)}, ${Math.round(debugInfo.mousePosition.y)}`
+                    ) : (
+                      'なし'
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-gray-400">コンテナサイズ: </span>
+                    {debugInfo.containerSize ? (
+                      `${Math.round(debugInfo.containerSize.width)}x${Math.round(debugInfo.containerSize.height)}`
+                    ) : (
+                      'なし'
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-gray-400">スクロール速度: </span>
+                    {`${Math.round(debugInfo.scrollSpeed.x)}, ${Math.round(debugInfo.scrollSpeed.y)}`}
+                  </div>
+                  <div>
+                    <span className="text-gray-400">選択範囲: </span>
+                    {selectionRange ? (
+                      `${selectionRange.start.row},${selectionRange.start.col} → ${selectionRange.end.row},${selectionRange.end.col}`
+                    ) : (
+                      'なし'
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-gray-400">アクティブセル: </span>
+                    {selectedCell ? `${selectedCell.row},${selectedCell.col}` : 'なし'}
+                  </div>
+                </div>
               </div>
             </div>
           )}
