@@ -112,8 +112,15 @@ export function useSpreadsheetSelection({
             }
           }
 
-          setSelectedCell(newRange.end)
-          setSelectionRange(newRange)
+          // 状態更新をバッチ処理
+          requestAnimationFrame(() => {
+            setSelectedCell(newRange.end)
+            setSelectionRange(newRange)
+            // グリッドの再レンダリングを強制
+            if (gridRef.current) {
+              gridRef.current.recomputeGridSize()
+            }
+          })
         }
       }
     },
