@@ -33,6 +33,7 @@ interface UseSpreadsheetScrollProps {
   defaultColumnWidth?: number
   isDragging: boolean
   onScroll?: (scrollLeft: number, scrollTop: number) => void
+  onMouseMove?: (mousePosition: { x: number; y: number } | null) => void
 }
 
 export function useSpreadsheetScroll({
@@ -42,7 +43,8 @@ export function useSpreadsheetScroll({
   defaultRowHeight = 24,
   defaultColumnWidth = 100,
   isDragging,
-  onScroll
+  onScroll,
+  onMouseMove,
 }: UseSpreadsheetScrollProps) {
   const [scrollState, setScrollState] = useState<ScrollState>({
     isScrolling: false,
@@ -117,12 +119,16 @@ export function useSpreadsheetScroll({
     setScrollState(newScrollState)
 
     // マウス位置の状態を更新
-    lastMousePositionRef.current = {
+    const newMousePosition = {
       x: mouseX,
       y: mouseY,
       rect: mainGridRect
     }
-  }, [isDragging, calculateScrollZone, calculateScrollDirection])
+    lastMousePositionRef.current = newMousePosition
+
+    // マウス位置の更新を通知
+    onMouseMove?.(newMousePosition)
+  }, [isDragging, calculateScrollZone, calculateScrollDirection, onMouseMove])
 
   const startScrolling = useCallback(() => {
     if (!lastMousePositionRef.current || !gridRef.current) return
@@ -171,10 +177,8 @@ export function useSpreadsheetScroll({
         // スクロール位置の更新と通知を同期して実行
         grid.scrollToPosition({ scrollLeft: newScrollLeft, scrollTop: newScrollTop })
         
-        // スクロール位置の変更を通知する前に、次のフレームをスケジュール
-        requestAnimationFrame(() => {
-          onScroll?.(newScrollLeft, newScrollTop)
-        })
+        // スクロール位置の変更を即座に通知
+        onScroll?.(newScrollLeft, newScrollTop)
       }
 
       // スクロールが必要な場合は次のフレームをスケジュール

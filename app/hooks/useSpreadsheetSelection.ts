@@ -72,6 +72,7 @@ export function useSpreadsheetSelection({
 }: UseSpreadsheetSelectionProps) {
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null)
   const [selectionRange, setSelectionRange] = useState<CellRange | null>(null)
+  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null)  // マウス位置をステートとして管理
   const isDraggingRef = useRef(false)
   const headerDragTypeRef = useRef<'row' | 'column' | null>(null)
   const isHeaderDragRef = useRef(false)
@@ -91,31 +92,37 @@ export function useSpreadsheetSelection({
         const col = Math.min(Math.max(0, Math.floor((mouseX + scrollLeft) / COLUMN_WIDTH)), columnCount - 1)
         const row = Math.min(Math.max(0, Math.floor((mouseY + scrollTop) / ROW_HEIGHT)), rowCount - 1)
 
-        // 選択範囲を更新
-        setSelectionRange(prev => {
-          if (!prev) return null
-
+        // 選択範囲を直接更新（requestAnimationFrameを使用しない）
+        if (selectionRange) {
           let newRange: CellRange
           if (headerDragTypeRef.current === 'row') {
             newRange = {
-              start: prev.start,
+              start: selectionRange.start,
               end: { row, col: columnCount - 1 }
             }
           } else if (headerDragTypeRef.current === 'column') {
             newRange = {
-              start: prev.start,
+              start: selectionRange.start,
               end: { row: rowCount - 1, col }
             }
           } else {
             newRange = {
-              start: prev.start,
+              start: selectionRange.start,
               end: { row, col }
             }
           }
 
           setSelectedCell(newRange.end)
-          return newRange
-        })
+          setSelectionRange(newRange)
+        }
+      }
+    },
+    onMouseMove: (newMousePosition) => {
+      // マウス位置を更新（枠外でも動作）
+      if (newMousePosition) {
+        const { x: mouseX, y: mouseY } = newMousePosition
+        lastMousePositionRef.current = { x: mouseX, y: mouseY }
+        setMousePosition({ x: mouseX, y: mouseY })
       }
     }
   })
@@ -377,9 +384,6 @@ export function useSpreadsheetSelection({
       mouseY = 0
     }
 
-    // マウス位置を保存
-    lastMousePositionRef.current = { x: mouseX, y: mouseY }
-
     // スクロール処理を実行
     handleScrollMouseMove(e)
 
@@ -508,7 +512,7 @@ export function useSpreadsheetSelection({
   }, [onCellContextMenu])
 
   const debugInfo: DebugInfo = {
-    mousePosition: lastMousePositionRef.current,
+    mousePosition,  // ステートの値を使用
     containerSize: gridRef.current ? {
       width: (gridRef.current as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer.clientWidth,
       height: (gridRef.current as unknown as { _scrollingContainer: HTMLElement })._scrollingContainer.clientHeight
